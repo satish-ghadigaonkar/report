@@ -5,6 +5,7 @@ import math
 class Cell():
     def __init__(self, text, spacing=None, just=None, split=None):
         self.text = text if text is not None else ''
+        #self.text = text
         self.spacing = spacing
         self.split = split
 
@@ -17,7 +18,7 @@ class Cell():
         self.just = just if just is not None else '<'
 
     def get_wrapped_text(self):
-        wrapper = TextWrapper(width=self.print_width)
+        wrapper = TextWrapper(width=self.print_width,drop_whitespace=True)
 
         if self.split is None:
             wrapped_text = wrapper.wrap(self.text)
@@ -48,13 +49,13 @@ class Cell():
 
 
 class Column:
-    def __init__(self, *cells, label=None,max_width=None, min_width=1, spacing=None, wrap=True, just=None):
+    def __init__(self, *cells, label=None, max_width=None, min_width=1, spacing=None, wrap=True, just=None, split=None):
         self.cells = cells
         self.max_width = max_width if max_width is not None else math.inf
         self.min_width = min_width if min_width is not None else 1
         self.max_content_width = self.get_max_content_width()
-        self.label=label
         self.wrap = wrap
+        self.split=split
 
         if not self.wrap:
             self.min_width = self.max_content_width
@@ -63,6 +64,9 @@ class Column:
         self.set_width(self.pref_width)
         self.set_spacing(spacing)
         self.set_just(just)
+        self.set_split(split)
+
+        self.label=label
 
     def set_spacing(self, spacing):
         self.spacing = spacing
@@ -81,6 +85,12 @@ class Column:
 
         for cell in self.cells:
             cell.just = self.just
+
+    def set_split(self, split):
+        self.split = split
+
+        for cell in self.cells:
+            cell.split = split
 
     def get_max_content_width(self):
         return max(cell.content_width for cell in self.cells)
@@ -120,12 +130,14 @@ class Columns():
         no_of_rows = max(len(column.cells) for column in self.columns)
 
         for column in self.columns:
-            if len(column.cells) < no_of_rows:
+            #print(f'Here {len(column.cells)}')
+            while len(column.cells) < no_of_rows:
                 column.append_cell(Cell(None))
 
         return self
 
     def calculate_width(self):
+        self.align_column_length()
         tot_used_width = sum([column.width + column.spacing for column in self.columns])
 
         if tot_used_width < self.linesize:
@@ -174,7 +186,17 @@ class Columns():
         return self
 
     def get_rows(self):
-        return zip_longest(*(column.cells for column in self.columns))
+        return (Row(*row) for row in zip_longest(*(column.cells for column in self.columns)))
+
+    def get_header_row(self):
+        header = tuple()
+        for column in self.columns:
+            label = Cell(column.label, column.spacing, column.just, column.split)
+            label.print_width = column.width
+            header = header + (label,)
+
+        return Row(*header)
+
 
 
 class Row():
@@ -190,20 +212,19 @@ class Row():
             file.write('\n')
 
 
-import lorem
-
-col1 = Column(Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), spacing=0)
-col2 = Column(Cell(lorem.sentence()), Cell(None), Cell(lorem.sentence()))
-col3 = Column(Cell(lorem.sentence()), Cell(None), Cell(None), Cell(lorem.sentence()))
-col4 = Column(Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()))
-
-test = Columns(col1, col2, col3, col4, linesize=121, spacing=2)
-
-with open(r'C:\Users\sasg\PycharmProjects\report\src\output\test.text', 'w') as fl:
-    for row in test.align_column_length().calculate_width().get_rows():
-        rowobj = Row(*row)
-        rowobj.print_row(fl)
-        fl.write('\n')
+# import lorem
+#
+# col1 = Column(Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), spacing=0, label='column1')
+# col2 = Column(Cell(lorem.sentence()), Cell(None), Cell(lorem.sentence()), label='column2')
+# col3 = Column(Cell(lorem.sentence()), Cell(None), Cell(None), Cell(lorem.sentence()), label='column3')
+# col4 = Column(Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()))
+#
+# test = Columns(col1, col2, col3, col4, linesize=121, spacing=2)
+#
+# with open(r'C:\Users\sasg\PycharmProjects\report\src\output\test.text', 'w') as fl:
+#     for row in test.calculate_width().get_rows():
+#         row.print_row(fl)
+#         fl.write('\n')
 
 # title = Cell("This is very long§text", split='§', just='^')
 #
