@@ -121,6 +121,7 @@ class Columns():
         self.linesize = linesize
         self.groupby = groupby
         self.spacing = spacing if spacing is not None else 0
+        self.columns_by_page = []
 
         for column in self.columns:
             if column.spacing is None:
@@ -135,54 +136,77 @@ class Columns():
                 column.append_cell(Cell(None))
 
         return self
+    
+    def recurse(self, cols):
+        for columns in cols:
+            tot_used_width = sum([column.width + column.spacing for column in columns])
+
+            if tot_used_width < self.linesize:
+                remain_width = self.linesize - tot_used_width
+                while remain_width > 0 and any(column.width < column.max_width for column in columns):
+                    tot_max_content_width = sum(
+                        column.max_content_width for column in columns if column.width < column.max_width)
+                    for i, column in enumerate(columns):
+                        if column.width < column.max_width:
+                            width_ratio = math.ceil(remain_width * (column.max_content_width / tot_max_content_width))
+                            column.set_width(min(column.width + width_ratio
+                                                 , column.max_width
+                                                 , column.width + self.linesize - sum(
+                                    [column.width + column.spacing for column in columns])
+                                                 , self.linesize - column.spacing))
+
+                    tot_used_width = sum([column.width + column.spacing for column in columns])
+                    remain_width = self.linesize - tot_used_width
+
+                self.columns_by_page.append(Columns(*columns, linesize=self.linesize, spacing=self.spacing))
+            elif tot_used_width > self.linesize:
+
+                excess_width = tot_used_width - self.linesize
+                while excess_width > 0 and any(column.width > column.min_width for column in columns):
+                    tot_max_content_width = sum(
+                        column.max_content_width for column in columns if column.width > column.min_width)
+                    wgt_divisor = len([column for column in columns if column.width > column.min_width]) - 1
+                    print(tot_max_content_width)
+                    for i, column in enumerate(columns):
+                        if column.width > column.min_width:
+                            # print(tot_max_content_width, column.max_content_width, wgt_divisor)
+                            # if wgt_divisor > 0:
+                            #     width_ratio = math.ceil(
+                            #         excess_width * ((
+                            #                                 tot_max_content_width - column.max_content_width) / tot_max_content_width) / wgt_divisor)
+                            # else:
+                            #     width_ratio = excess_width
+                            width_ratio = math.ceil(excess_width * (column.max_content_width / tot_max_content_width))
+                            column.set_width(min(max(column.width - width_ratio, column.width - excess_width,
+                                                     column.width + self.linesize - sum(
+                                                         [column.width + column.spacing for column in columns]),
+                                                     column.min_width), self.linesize - column.spacing))
+
+                    tot_used_width = sum([column.width + column.spacing for column in columns])
+                    excess_width = tot_used_width - self.linesize
+
+                if excess_width > 0:
+                    cols1 = columns
+                    cols2 = tuple()
+
+                    while excess_width > 0:
+                        cols2 = (cols1[-1],) + cols2
+                        cols1 = cols1[:-1]
+                        tot_used_width = sum([column.width + column.spacing for column in cols1])
+                        excess_width = tot_used_width - self.linesize
+                    self.recurse([cols1, cols2])
+                else:
+                    self.columns_by_page.append(Columns(*columns, linesize=self.linesize, spacing=self.spacing))
+            else:
+                self.columns_by_page.append(Columns(*columns, linesize=self.linesize, spacing=self.spacing))
+        return
+
 
     def calculate_width(self):
         self.align_column_length()
-        tot_used_width = sum([column.width + column.spacing for column in self.columns])
 
-        if tot_used_width < self.linesize:
-            remain_width = self.linesize - tot_used_width
-            while remain_width > 0 and any(column.width < column.max_width for column in self.columns):
-                tot_max_content_width = sum(
-                    column.max_content_width for column in self.columns if column.width < column.max_width)
-                for i, column in enumerate(self.columns):
-                    if column.width < column.max_width:
-                        width_ratio = math.ceil(remain_width * (column.max_content_width / tot_max_content_width))
-                        column.set_width(min(column.width + width_ratio
-                                             , column.max_width
-                                             , column.width + self.linesize - sum(
-                                [column.width + column.spacing for column in self.columns])
-                                             , self.linesize - column.spacing))
-
-                tot_used_width = sum([column.width + column.spacing for column in self.columns])
-                remain_width = self.linesize - tot_used_width
-
-        elif tot_used_width > self.linesize:
-
-            excess_width = tot_used_width - self.linesize
-            while excess_width > 0 and any(column.width > column.min_width for column in self.columns):
-                tot_max_content_width = sum(
-                    column.max_content_width for column in self.columns if column.width > column.min_width)
-                wgt_divisor = len([column for column in self.columns if column.width > column.min_width]) - 1
-                print(tot_max_content_width)
-                for i, column in enumerate(self.columns):
-                    if column.width > column.min_width:
-                        # print(tot_max_content_width, column.max_content_width, wgt_divisor)
-                        # if wgt_divisor > 0:
-                        #     width_ratio = math.ceil(
-                        #         excess_width * ((
-                        #                                 tot_max_content_width - column.max_content_width) / tot_max_content_width) / wgt_divisor)
-                        # else:
-                        #     width_ratio = excess_width
-                        width_ratio = math.ceil(excess_width * (column.max_content_width / tot_max_content_width))
-                        column.set_width(min(max(column.width - width_ratio, column.width - excess_width,
-                                                 column.width + self.linesize - sum(
-                                                     [column.width + column.spacing for column in self.columns]),
-                                                 column.min_width), self.linesize - column.spacing))
-
-                tot_used_width = sum([column.width + column.spacing for column in self.columns])
-                excess_width = tot_used_width - self.linesize
-
+        self.recurse([self.columns])
+        print(self.columns_by_page)
         return self
 
     def get_rows(self):

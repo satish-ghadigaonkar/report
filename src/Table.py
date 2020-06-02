@@ -43,12 +43,12 @@ class Table:
 
         return fixed_lines
 
-    def print_header(self):
+    def print_header(self, header):
         if self.before_header_line:
             self.file.write(self.line)
             self.file.write('\n')
 
-        self.header.print_row(self.file)
+        header.print_row(self.file)
 
         if self.after_header_line:
             self.file.write(self.line)
@@ -63,11 +63,11 @@ class Table:
         if self.footnote.content_width > 0:
             self.footnote.print_cell(self.file)
 
-    def print_page(self, rows):
+    def print_page(self, header, rows):
         self.print_title()
 
         if self.display_header:
-            self.print_header()
+            self.print_header(header)
         else:
             self.file.write(self.line + '\n')
 
@@ -78,34 +78,32 @@ class Table:
         self.print_footer()
 
     def print_table(self):
-        remaining_lines = self.page.pagesize - self.get_fixed_lines()
-        print(remaining_lines)
-        rows_to_print = tuple()
+        for columns in table.columns.columns_by_page:
+            remaining_lines = self.page.pagesize - self.get_fixed_lines()
+            rows_to_print = tuple()
+            for row in columns.get_rows():
+                if remaining_lines >= row.max_lines:
+                    rows_to_print = rows_to_print + (row,)
+                    remaining_lines = remaining_lines - row.max_lines
+                else:
+                    self.print_page(columns.get_header_row(), rows_to_print)
+                    self.file.write("\u000C")
+                    remaining_lines = self.page.pagesize - self.get_fixed_lines() - row.max_lines
+                    rows_to_print = (row,)
 
-        for row in table.columns.get_rows():
-            print(remaining_lines, row.max_lines)
-            if remaining_lines >= row.max_lines:
-                rows_to_print = rows_to_print + (row,)
-                remaining_lines = remaining_lines - row.max_lines
-            else:
-                self.print_page(rows_to_print)
-                self.file.write("\u000C")
-                remaining_lines = self.page.pagesize - self.get_fixed_lines()
-                rows_to_print = (row,)
-
-        self.print_page(rows_to_print)
+            self.print_page(columns.get_header_row(), rows_to_print)
 
 
 import lorem
 
-col1 = Column(*(Cell(lorem.sentence()) for i in range(50)), spacing=0, label='Column 1', split='~')
-col2 = Column(*(Cell(lorem.sentence()) for i in range(50)), Cell(None), Cell('Where is this?'), label='Column 2')
-col3 = Column(*(Cell(lorem.sentence()) for i in range(50)), Cell(None), Cell(lorem.sentence()), label='Column 3', just='>')
-col4 = Column(*(Cell(lorem.sentence()) for i in range(50)), label='Column 4')
+col1 = Column(*(Cell(f'{i:0}') for i in range(100)), spacing=0, label=None, split='~',wrap=False, just='<')
+col2 = Column(*(Cell(lorem.sentence()) for i in range(100)), Cell(None), Cell('Where is this?'), label='Column 2', min_width=60)
+col3 = Column(*(Cell(lorem.sentence()) for i in range(100)), Cell(None), Cell(lorem.sentence()), label='Column 3', min_width=30)
+col4 = Column(*(Cell(lorem.sentence()) for i in range(100)), label='Column 4', min_width=30)
 
 page = Page(121, 56)
 with open(r'C:\Users\sasg\PycharmProjects\report\src\output\test.text', 'w') as fl:
-    table = Table(col1, col2, col3, col4, page=page, file=fl, spacing=2, display_header=True,
+    table = Table(col1, col2, col3, col4, page=page, file=fl, spacing=1, display_header=True,
                   title=None,
                   footnote="Footnote")
     table.print_table()
