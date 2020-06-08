@@ -1,26 +1,87 @@
 from textwrap import TextWrapper
 from itertools import zip_longest
 import math
+from operator import itemgetter
+from statistics import mean, median
+from sys import stdout
+from datetime import datetime
+
 
 class Cell():
-    def __init__(self, text, spacing=None, just=None, split=None):
-        self.text = text if text is not None else ''
-        #self.text = text
-        self.spacing = spacing
-        self.split = split
+    def __init__(self, value, spacing=None, just=None, split=None, print_width=None, noprint=False):
+        self.value = value
 
-        if split is None:
-            self.content_width = len(self.text)
+        if self.value is None:
+            self.text = ''
+        elif isinstance(value, str):
+            self.text = self.value
         else:
-            self.content_width = max(len(part) for part in self.text.split(self.split))
+            self.text = str(self.value)
 
-        self.print_width = self.content_width
+        self.spacing = spacing
         self.just = just if just is not None else '<'
+        self.split = split
+        self.noprint = noprint if noprint is not None else False
+        self._print_width = print_width
 
-    def get_wrapped_text(self):
-        wrapper = TextWrapper(width=self.print_width,drop_whitespace=True)
+    def __repr__(self):
+        return self.text
 
+    def __eq__(self, other):
+        if self.value is None and other.value is None:
+            return True
+        elif self.value is None or other.value is None:
+            return False
+        else:
+            return self.value == other.value
+
+    def __lt__(self, other):
+        if self.value is None and other.value is None:
+            return False
+        elif self.value is None:
+            return True
+        else:
+            if other.value is None:
+                return False
+            else:
+                return self.value < other.value
+
+    def __gt__(self, other):
+        if self.value is None and other.value is None:
+            return False
+        elif self.value is None:
+            return False
+        else:
+            if other.value is None:
+                return True
+            else:
+                return self.value > other.value
+
+    def __mul__(self, other):
+        return tuple(self for i in range(other))
+
+    @property
+    def content_width(self):
         if self.split is None:
+            return len(self.text)
+        else:
+            return max(len(part) for part in self.text.split(self.split))
+
+    @property
+    def print_width(self):
+        return self._print_width if self._print_width is not None else self.content_width
+
+    @print_width.setter
+    def print_width(self, new_print_width):
+        self._print_width = new_print_width
+
+    @property
+    def wrapped_text(self):
+        wrapper = TextWrapper(width=self.print_width)
+
+        if self.text.isspace():
+            wrapped_text = [' ']
+        elif self.split is None:
             wrapped_text = wrapper.wrap(self.text)
         else:
             parts = self.text.split(self.split)
@@ -30,43 +91,67 @@ class Cell():
 
         return wrapped_text
 
-    def get_max_lines(self):
-        return len(self.get_wrapped_text())
+    @property
+    def max_lines(self):
+        return len(self.wrapped_text)
 
-    def print_cell_line(self, lineno, file):
+    def write_line(self, lineno, file):
         spacing = self.spacing if self.spacing is not None else 0
-        wrapped_text = self.get_wrapped_text()
+        wrapped_text = self.wrapped_text
+
         if lineno < len(wrapped_text):
             text = wrapped_text[lineno]
             file.write(f"{' ' * spacing}{text:{self.just}{self.print_width}}")
         else:
             file.write(f"{' ' * spacing}{' ' * self.print_width}")
 
-    def print_cell(self, file):
-        for i in range(self.get_max_lines()):
-            self.print_cell_line(i, file)
+    def write(self, file):
+        for i in range(self.max_lines):
+            self.write_line(i, file)
             file.write('\n')
 
 
 class Column:
-    def __init__(self, *cells, label=None, max_width=None, min_width=1, spacing=None, wrap=True, just=None, split=None):
+    def __init__(self, *cells, label=None, max_width=None, min_width=1, spacing=None, wrap=True, wrap_header=True,
+                 just=None, split=None):
         self.cells = cells
         self.max_width = max_width if max_width is not None else math.inf
         self.min_width = min_width if min_width is not None else 1
-        self.max_content_width = self.get_max_content_width()
         self.wrap = wrap
-        self.split=split
-
-        if not self.wrap:
-            self.min_width = self.max_content_width
-
-        self.pref_width = self.get_pref_width()
-        self.set_width(self.pref_width)
+        self.wrap_header = wrap_header
+        self.label = label
         self.set_spacing(spacing)
         self.set_just(just)
         self.set_split(split)
+        self.set_width(min(self.max_width, max(self.max_content_width, self.pref_min_width)))
 
-        self.label=label
+    def __repr__(self):
+        return self.cells.__repr__()
+
+    def __getitem__(self, index: int):
+        return self.cells[index]
+
+    @property
+    def max_content_width(self):
+        return max(cell.content_width for cell in self.cells)
+
+    @property
+    def pref_min_width(self):
+        if not self.wrap:
+            if not self.wrap_header:
+                return max(self.min_width, self.max_content_width,
+                           *(len(string) for string in self.label.split(self.split)))
+            else:
+                return max(self.min_width, self.max_content_width)
+        else:
+            if not self.wrap_header:
+                return max(self.min_width, *(len(string) for string in self.label.split(self.split)))
+            else:
+                return self.min_width
+
+    @property
+    def pref_width(self):
+        return min(self.max_width, max(self.max_content_width, self.pref_min_width))
 
     def set_spacing(self, spacing):
         self.spacing = spacing
@@ -90,53 +175,64 @@ class Column:
         self.split = split
 
         for cell in self.cells:
-            cell.split = split
+            cell.split = self.split
 
-    def get_max_content_width(self):
-        return max(cell.content_width for cell in self.cells)
-
-    def get_pref_width(self):
-        return min(self.max_width, max(self.max_content_width, self.min_width))
-
-    def append_cell(self, new_cell):
-        self.cells = self.cells + (new_cell,)
-        self.max_content_width = self.get_max_content_width()
-
-        if not self.wrap:
-            self.min_width = self.max_content_width
-
-        self.pref_width = self.get_pref_width()
-        self.set_width(self.pref_width)
+    def append_cells(self, *new_cells):
+        self.cells = self.cells + new_cells
         self.set_spacing(self.spacing)
         self.set_just(self.just)
+        self.set_split(self.split)
 
         return self
+
+    def sort(self, reverse=False):
+        self.cells = sorted(self.cells, reverse=reverse)
+        return self
+
 
 # test = Column(["This is no a test", "This is a test"])
 # print(test.pref_width)
 
 class Columns():
-    def __init__(self, *columns, linesize, spacing=0, groupby=None):
-        self.columns = columns
+    def __init__(self, *columns, linesize, spacing=0, orderby=None, split='~'):
+        self.columns = self.align_column_length(*columns)
         self.linesize = linesize
-        self.groupby = groupby
+        self.orderby = orderby
         self.spacing = spacing if spacing is not None else 0
+        self.split = split if split is not None else '~'
         self.columns_by_page = []
 
         for column in self.columns:
             if column.spacing is None:
                 column.set_spacing(self.spacing)
 
-    def align_column_length(self):
-        no_of_rows = max(len(column.cells) for column in self.columns)
+            if column.split is None:
+                column.set_split(self.split)
 
-        for column in self.columns:
-            #print(f'Here {len(column.cells)}')
-            while len(column.cells) < no_of_rows:
-                column.append_cell(Cell(None))
+    def align_column_length(self, *columns):
+        no_of_rows = max(len(column.cells) for column in columns)
+        result = ()
+
+        for column in columns:
+            if len(column.cells) < no_of_rows:
+                column = column.append_cells(*(Cell(None) * (no_of_rows - len(column.cells))))
+
+            result = result + (column,)
+
+        return result
+
+    def sort(self, reverse=False):
+        if self.orderby is not None:
+            sortindex = (index for index in (self.columns.index(column) for column in self.orderby))
+            rows = (row for row in zip(*(column.cells for column in self.columns)))
+
+            for i, cells in enumerate(
+                    zip(*(row for row in sorted(rows, key=itemgetter(*sortindex), reverse=reverse)))):
+                self.columns[i].cells = cells
 
         return self
-    
+        # sorted(*(row for row in zip(*(column.cells for column in self.columns))), key=)
+
     def recurse(self, cols):
         for columns in cols:
             tot_used_width = sum([column.width + column.spacing for column in columns])
@@ -151,6 +247,8 @@ class Columns():
                             width_ratio = math.ceil(remain_width * (column.max_content_width / tot_max_content_width))
                             column.set_width(min(column.width + width_ratio
                                                  , column.max_width
+                                                 , column.pref_width if any(
+                                    column.width < column.pref_width for column in columns) else column.max_width
                                                  , column.width + self.linesize - sum(
                                     [column.width + column.spacing for column in columns])
                                                  , self.linesize - column.spacing))
@@ -162,13 +260,12 @@ class Columns():
             elif tot_used_width > self.linesize:
 
                 excess_width = tot_used_width - self.linesize
-                while excess_width > 0 and any(column.width > column.min_width for column in columns):
+                while excess_width > 0 and any(column.width > column.pref_min_width for column in columns):
                     tot_max_content_width = sum(
-                        column.max_content_width for column in columns if column.width > column.min_width)
-                    wgt_divisor = len([column for column in columns if column.width > column.min_width]) - 1
-                    print(tot_max_content_width)
+                        column.max_content_width for column in columns if column.width > column.pref_min_width)
+                    wgt_divisor = len([column for column in columns if column.width > column.pref_min_width]) - 1
                     for i, column in enumerate(columns):
-                        if column.width > column.min_width:
+                        if column.width > column.pref_min_width:
                             # print(tot_max_content_width, column.max_content_width, wgt_divisor)
                             # if wgt_divisor > 0:
                             #     width_ratio = math.ceil(
@@ -180,7 +277,9 @@ class Columns():
                             column.set_width(min(max(column.width - width_ratio, column.width - excess_width,
                                                      column.width + self.linesize - sum(
                                                          [column.width + column.spacing for column in columns]),
-                                                     column.min_width), self.linesize - column.spacing))
+                                                     column.pref_min_width, column.pref_width if any(
+                                    column.width > column.pref_width for column in columns) else column.pref_min_width),
+                                                 self.linesize - column.spacing))
 
                     tot_used_width = sum([column.width + column.spacing for column in columns])
                     excess_width = tot_used_width - self.linesize
@@ -201,16 +300,12 @@ class Columns():
                 self.columns_by_page.append(Columns(*columns, linesize=self.linesize, spacing=self.spacing))
         return
 
-
     def calculate_width(self):
-        self.align_column_length()
-
         self.recurse([self.columns])
-        print(self.columns_by_page)
         return self
 
     def get_rows(self):
-        return (Row(*row) for row in zip_longest(*(column.cells for column in self.columns)))
+        return (Row(*row) for row in zip(*(column.cells for column in self.columns)))
 
     def get_header_row(self):
         header = tuple()
@@ -222,35 +317,26 @@ class Columns():
         return Row(*header)
 
 
-
 class Row():
     def __init__(self, *cells):
         self.cells = cells
-        self.max_lines = max(cell.get_max_lines() for cell in self.cells)
 
-    def print_row(self, file):
+    @property
+    def max_lines(self):
+        return max(cell.max_lines for cell in self.cells)
+
+    def __repr__(self):
+        return self.cells.__repr__()
+
+    def write(self, file):
         for i in range(self.max_lines):
             for cell in self.cells:
-                cell.print_cell_line(i, file)
+                cell.write_line(i, file)
 
             file.write('\n')
 
-
-# import lorem
+# class GroupBy():
+#     def __init__(self, *columns):
+#         self.columns =  columns
 #
-# col1 = Column(Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), spacing=0, label='column1')
-# col2 = Column(Cell(lorem.sentence()), Cell(None), Cell(lorem.sentence()), label='column2')
-# col3 = Column(Cell(lorem.sentence()), Cell(None), Cell(None), Cell(lorem.sentence()), label='column3')
-# col4 = Column(Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()), Cell(lorem.sentence()))
-#
-# test = Columns(col1, col2, col3, col4, linesize=121, spacing=2)
-#
-# with open(r'C:\Users\sasg\PycharmProjects\report\src\output\test.text', 'w') as fl:
-#     for row in test.calculate_width().get_rows():
-#         row.print_row(fl)
-#         fl.write('\n')
-
-# title = Cell("This is very long§text", split='§', just='^')
-#
-# with open(r'C:\Users\sasg\PycharmProjects\report\src\output\test.text', 'w') as fl:
-#     title.print_cell(fl)
+#     def groupby(self):
