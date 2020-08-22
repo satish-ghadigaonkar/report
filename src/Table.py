@@ -6,6 +6,7 @@ class Page:
         self.pagesize = pagesize
         self.linesize = linesize
 
+
 class Title(Cell):
     def write(self, file):
         if self.content_width > 0:
@@ -27,7 +28,8 @@ class Footnotes():
         else:
             for footer in self._footnotes:
                 if isinstance(footer, (list, tuple)):
-                    footnotes = footnotes + (Cell(footer[0], just=footer[1], split=self.split, print_width=self.linesize),)
+                    footnotes = footnotes + (
+                        Cell(footer[0], just=footer[1], split=self.split, print_width=self.linesize),)
                 else:
                     footnotes = footnotes + (Cell(footer, split=self.split, print_width=self.linesize),)
 
@@ -48,110 +50,134 @@ class Footnotes():
         for footer in self.footnotes:
             footer.write(file)
 
+
 class Table:
-    def __init__(self, *columns, orderby=None, page, file, title=None, footnotes=None, spacing=0, split='~', before_header_line=True,
+    def __init__(self, columns, page, title=None, footnotes=None, before_header_line=True,
                  after_header_line=True, display_header=True, linechar='\u2014', double_spaced=False):
-        self.orderby = orderby
-        self.spacing = spacing
-        self.split = split
-        self.file = file
+        self.columns = columns
         self.page = page
         self.display_header = display_header
         self.double_spaced = double_spaced
         self.linechar = linechar
 
-        self.columns = Columns(*columns, orderby=self.orderby, linesize=self.page.linesize, spacing=self.spacing, split=self.split).calculate_width().sort()
-        self.title = Title(title, split=self.split, print_width=self.page.linesize)
+        self.title = Title(title, print_width=self.page.linesize, split=self.columns.split)
 
-        if isinstance(footnotes,(list, tuple)):
-            self.footnotes = Footnotes(*footnotes, split=self.split, linesize=self.page.linesize)
+        if isinstance(footnotes, (list, tuple)):
+            self.footnotes = Footnotes(*footnotes, linesize=self.page.linesize, split=self.columns.split)
         else:
-            self.footnotes = Footnotes(footnotes, split=self.split, linesize=self.page.linesize)
+            self.footnotes = Footnotes(footnotes, linesize=self.page.linesize, split=self.columns.split)
 
         self.before_header_line = before_header_line
         self.after_header_line = after_header_line
 
-
-        self.header = self.columns.get_header_row()
         self.line = self.linechar * self.page.linesize
 
-
-    def get_fixed_lines(self):
+    def get_fixed_lines(self, pageindex):
         # A line before table start, a line before footnote is always printed, so the
         # constant 2 is added
         fixed_lines = self.title.max_lines + (
-                    self.title.max_lines > 0) * 1 + self.footnotes.max_lines + 2
+                self.title.max_lines > 0) * 1 + self.footnotes.max_lines + 2
 
         if self.display_header:
-            fixed_lines = fixed_lines + self.columns.get_header_row().max_lines
+            fixed_lines = fixed_lines + self.columns.get_header_row(pageindex).max_lines
 
             if self.after_header_line:
                 fixed_lines += 1
 
         return fixed_lines
 
-    def print_header(self, header):
+    def print_header(self, header, file):
         if self.before_header_line:
-            self.file.write(self.line)
-            self.file.write('\n')
+            file.write(self.line)
+            file.write('\n')
 
-        header.write(self.file)
+        header.write(file, align_bottom=True)
 
         if self.after_header_line:
-            self.file.write(self.line)
-            self.file.write('\n')
+            file.write(self.line)
+            file.write('\n')
 
-    def print_page(self, header, rows):
-        self.title.write(self.file)
+    def print_page(self, header, rowgroups, file):
+        self.title.write(file)
 
         if self.display_header:
-            self.print_header(header)
+            self.print_header(header, file)
         else:
-            self.file.write(self.line + '\n')
+            file.write(self.line + '\n')
 
-        for row in rows:
-            row.write(self.file)
+        for rowgroup in rowgroups:
+            rowgroup.rowlabel.write(file)
             if self.double_spaced:
-                self.file.write('\n')
+                file.write('\n')
 
-        self.file.write(self.line + '\n')
-        self.footnotes.write(self.file)
+            for row in rowgroup.rows:
+                row.write(file)
+                if self.double_spaced:
+                    file.write('\n')
 
-    def print_table(self):
-        for columns in table.columns.columns_by_page:
-            remaining_lines = self.page.pagesize - self.get_fixed_lines()
-            rows_to_print = tuple()
-            for row in columns.get_rows():
-                if remaining_lines >= row.max_lines + (1 if self.double_spaced else 0):
-                    rows_to_print = rows_to_print + (row,)
-                    remaining_lines = remaining_lines - row.max_lines
+        file.write(self.line + '\n')
+        self.footnotes.write(file)
+
+    def print_table(self, file):
+        self.columns.calculate_width(self.page.linesize)
+        print(self.columns.pages)
+        for i in self.columns.pages:
+            self.columns.set_cell_width(self.columns.width[i])
+            remaining_lines = self.page.pagesize - self.get_fixed_lines(i)
+            rowgroups_to_print = tuple()
+
+            for rowgroup in self.columns.getrowgroup(*self.columns.pages[i], width=self.columns.width[i], spacing=self.columns.spacing):
+                if remaining_lines >= rowgroup.max_lines + (1 if self.double_spaced else 0):
+                    rowgroups_to_print = rowgroups_to_print + (rowgroup,)
+                    remaining_lines = remaining_lines - rowgroup.max_lines
                 else:
-                    self.print_page(columns.get_header_row(), rows_to_print)
-                    self.file.write("\u000C")
-                    rows_to_print = (row,)
-                    remaining_lines = self.page.pagesize - self.get_fixed_lines() - row.max_lines
+                    self.print_page(self.columns.get_header_row(i), rowgroups_to_print, file)
+                    file.write("\u000C")
+                    rowgroup.rowlabel.print_index = 0
+                    rowgroups_to_print = (rowgroup,)
+                    remaining_lines = self.page.pagesize - self.get_fixed_lines(i) - rowgroup.max_lines
 
                 if self.double_spaced:
                     remaining_lines = remaining_lines - 1
 
-            self.print_page(columns.get_header_row(), rows_to_print)
+            self.print_page(self.columns.get_header_row(i), rowgroups_to_print, file)
 
-import lorem
 
-col1 = Column(*(Cell(f'{i:0}') for i in range(50000)), wrap=False, wrap_header=False, label='Colu~mn 1', spacing=0, just='>')
-col2 = Column(*(Cell(lorem.sentence()) for i in range(50000)), Cell('efg'), Cell('abc'),label='Column 2', min_width=30)
-col3 = Column(*(Cell(lorem.sentence()) for i in range(50000)), Cell('This is a test'), Cell('This is a test'), label='Column 3', min_width=20)
-col4 = Column(*(Cell(lorem.sentence()) for i in range(50000)),label='Column 4', min_width=20)
+# import lorem
+# 
+# col1 = Column(*(Cell(f'{i:0}') for i in range(50000)), wrap=False, wrap_header=False, label='Colu~mn 1', spacing=0, just='>')
+# col2 = Column(*(Cell(lorem.sentence()) for i in range(50000)), Cell('efg'), Cell('abc'),label='Column 2', min_width=30)
+# col3 = Column(*(Cell(lorem.sentence()) for i in range(50000)), Cell('This is a test'), Cell('This is a test'), label='Column 3', min_width=20)
+# col4 = Column(*(Cell(lorem.sentence()) for i in range(50000)),label='Column 4', min_width=20)
+# 
+# from datetime import datetime
+# print(datetime.now().strftime("%d%b%Y %H:%M:%S.%f").upper())
+# page = Page(121, 50)
+# with open(r'C:\Users\sasg\PycharmProjects\report\src\output\test.txt', 'w') as fl:
+#     table = Table(col1, col2, col3, col4, page=page, file=fl, spacing=1, display_header=True,
+#                   orderby=(col2, col3, col4),
+#                   title='This is a title',
+#                   footnotes=["This is a footnote",(datetime.now().strftime("%d%b%Y:%H:%M:%S").upper(),'>')],
+#                   split='~', double_spaced=False)
+#     table.print_table()
+# 
+# print(datetime.now().strftime("%d%b%Y %H:%M:%S.%f").upper())
 
-from datetime import datetime
-print(datetime.now().strftime("%d%b%Y %H:%M:%S.%f").upper())
-page = Page(121, 50)
-with open(r'C:\Users\sasg\PycharmProjects\report\src\output\test.txt', 'w') as fl:
-    table = Table(col1, col2, col3, col4, page=page, file=fl, spacing=1, display_header=True,
-                  orderby=(col2, col3, col4),
-                  title='This is a title',
-                  footnotes=["This is a footnote",(datetime.now().strftime("%d%b%Y:%H:%M:%S").upper(),'>')],
-                  split='~', double_spaced=False)
-    table.print_table()
-
-print(datetime.now().strftime("%d%b%Y %H:%M:%S.%f").upper())
+# import lorem
+#
+# testcells = ()
+# for column in range(4):
+#     for row in range(10):
+#         testcells = testcells + (Cell(lorem.sentence(), colindex=column, rowindex=row),)
+#
+# page = Page(145, 50)
+#
+# table = Table(Columns(*testcells, colorder=range(4), linesize=145, wrap=True, minwidth=10, spacing=1,
+#                       label=('Column 0', 'Column 1', 'Column 2', 'Column 3'), just='^').calculate_width(), page,
+#               title='This is a title',
+#               footnotes=["This is a footnote", (datetime.now().strftime("%d%b%Y:%H:%M:%S").upper(), '>')],)
+#
+# print(table.columns.spacing)
+#
+# with open(r'C:\Users\sasg\PycharmProjects\report\src\output\test.txt', 'w') as fl:
+#     table.print_table(fl)
